@@ -213,11 +213,39 @@ class TestTolerantParsing:
 
 
 class TestTokenBound:
-    def test_oversized_content_truncated_before_llm(self, monkeypatch):
+    def test_oversized_content_is_windowed_before_llm(self, monkeypatch):
         spy = _Spy(_PASS_JSON)
         _install(monkeypatch, spy)
-        body = "Step: read the file and summarize it. " * 700 + "TAILMARKER_UNIQUE"
+        body = ("HEADMARK_UNIQUE " + "Step: read the file and summarize it. " * 800
+                + " MIDMARK_UNIQUE " + "z" * 20000)
         _review(content=_md("big-guide", "A big but benign guide.", body))
         user = spy.kwargs["messages"][1]["content"]
-        assert "TAILMARKER_UNIQUE" not in user, "content beyond the 12k bound must be truncated"
-        assert "Step: read the file" in user
+        assert "HEADMARK_UNIQUE" in user            # head kept
+        assert "MIDMARK_UNIQUE" not in user          # middle windowed out
+        assert "omitted" in user.lower()             # omission announced
+
+
+# --- Codex external review F9 (impacted_scope) + F11 (reproducible budget) ------
+
+class TestImpactedScope:
+    def test_llm_only_verdict_carries_finding_locators_as_scope(self, monkeypatch):
+        # F9: LLM-only findings must contribute their locators to impacted_scope (ED-4).
+        veto = ('{"decision":"veto","severity":"high","confidence":0.8,"rationale":"broad scope",'
+                '"findings":[{"locator":"tools","detail":"requests all tools"}]}')
+        _install(monkeypatch, _Spy(veto))
+        v = _review(content=SEED_CLEAN)
+        assert v.decision is Decision.VETO
+        assert "tools" in v.impacted_scope
+
+
+class TestBudgetCeiling:
+    def test_worst_case_prompt_within_char_ceiling(self, monkeypatch):
+        # F11: a reproducible ceiling regardless of input size, and max_tokens is pinned.
+        from tools.skill_review.llm import MAX_REVIEW_CHARS, REVIEW_MAX_TOKENS
+        spy = _Spy(_PASS_JSON)
+        _install(monkeypatch, spy)
+        _review(content=_md("big", "A giant but benign skill.", "A" * 200_000))
+        system = spy.kwargs["messages"][0]["content"]
+        user = spy.kwargs["messages"][1]["content"]
+        assert len(system) + len(user) < MAX_REVIEW_CHARS + 4_000
+        assert spy.kwargs["max_tokens"] == REVIEW_MAX_TOKENS
