@@ -24,11 +24,13 @@ deferred to a later (dynamic / sandbox / TLA+) phase, and why.
 - **Cross-version monotonicity for `create`/`edit`.** The frozen `SkillWrite` carries no prior
   version, so widening is only detectable within a `patch` delta. A `create`/`edit` that declares a
   broad scope is not monotonicity-vetoed (there is no baseline to compare).
-- **Block-style `allowed-tools` deltas.** Monotonicity parses the inline `allowed-tools: [a, b]`
-  form. A YAML block-list (`- a` / `- b`) widening is **not** vetoed. **This check is
-  defense-in-depth, not a guarantee** (S2 handoff lesson L7): a determined author can restructure
-  the manifest to evade it. Deepen with a full pre/post-image diff at the wiring layer (S4) or the
-  sandbox phase.
+- **`allowed-tools` manifest styles.** Monotonicity now parses **both** the inline
+  `allowed-tools: [a, b]` form **and** the YAML block-list (`- a` / `- b`) form, and compares
+  normalized sets — so an inline↔block reformat does not evade the veto and does not false-veto a
+  pure reformat (codex-F2). What is still NOT modelled: multi-document / anchored / flow-mapping YAML
+  exotica, and `allowed-tools` declared outside the patch delta. These remain best-effort, not a
+  guarantee (S2 handoff lesson L7) — deepen with a full pre/post-image diff at the wiring layer (S4)
+  or the sandbox phase.
 - **Owned-skill provenance (FI2), pinned protection (FI3), name collision (FI4).** These depend on
   sidecar/filesystem state (`created_by`, `pinned`, existing skill names) that a read-only reviewer
   (INV-4) cannot access, and that the **existing guards already enforce**

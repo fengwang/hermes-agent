@@ -16,8 +16,7 @@ State-dependent invariants — owned-skill (``created_by``), pinned protection, 
 — depend on sidecar/filesystem state a pure reviewer cannot read and that the existing guards
 (``_background_review_write_guard``, ``_create_skill``'s collision check) already enforce. This
 reviewer DEFERS them; S3's ``test_skill_review_formal.py::TestGuardsIntact`` proves those guards
-still fire independently. See docs/skill_review_static_limitations.md and docs/session_3/design.md
-§5-§8/§13.
+still fire independently. See docs/skill_review_static_limitations.md (fork-local).
 
 Depth is ``STATIC`` and every verdict carries a machine-actionable ``deferred-dynamic-checks``
 note (R2/R15). Pure Calculation: ``review()`` performs no I/O.
@@ -42,8 +41,15 @@ from tools.skill_review.schema import (
     Verdict,
 )
 
-_ALLOWED_TOOLS_RE = re.compile(r"allowed-tools\s*:\s*(.+)", re.I)
+_ALLOWED_TOOLS_LINE_RE = re.compile(r"^[ \t]*allowed-tools[ \t]*:[ \t]*(.*)$", re.I)
+_BLOCK_ITEM_RE = re.compile(r"^[ \t]*-[ \t]*(.+?)[ \t]*$")
 _FRONTMATTER_CLOSE_RE = re.compile(r"\n---\s*\n")
+
+
+def _cap(value: object, limit: int = 64) -> str:
+    """Bound an author-controlled string before it enters verdict evidence (codex-F6)."""
+    s = str(value)
+    return s if len(s) <= limit else f"{s[:limit]}…(+{len(s) - limit} chars)"
 
 _SEVERITY_RANK = {
     Severity.CRITICAL: 4,
@@ -66,21 +72,35 @@ _DEFERRED_NOTE = Evidence(
 
 
 def _parse_tool_list(value: str) -> frozenset[str]:
-    """Parse an ``allowed-tools`` value into a lowercased set. Handles ``[a, b]``, ``a, b``, ``*``."""
-    v = value.strip().strip("[]").strip()
+    """Parse an inline ``allowed-tools`` value into a lowercased set. Handles ``[a, b]``, ``a, b``,
+    ``*``; drops an inline ``# comment``."""
+    v = value.split("#", 1)[0].strip().strip("[]").strip()
     if not v:
         return frozenset()
-    return frozenset(t.strip().strip("\"'").lower() for t in v.split(",") if t.strip())
+    return frozenset(t.strip().strip("\"'").lower() for t in v.split(",") if t.strip().strip("\"'"))
 
 
 def _extract_allowed_tools(text: str | None) -> frozenset[str] | None:
-    """Return the declared ``allowed-tools`` set found in ``text``, or ``None`` if none is declared."""
+    """Return the declared ``allowed-tools`` set (inline ``[..]`` OR YAML block list), or ``None``
+    if none is declared / the block is empty (codex-F2: block-style widening must not evade)."""
     if not text:
         return None
-    match = _ALLOWED_TOOLS_RE.search(text)
-    if not match:
-        return None
-    return _parse_tool_list(match.group(1))
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _ALLOWED_TOOLS_LINE_RE.match(line)
+        if not m:
+            continue
+        inline = m.group(1).strip()
+        if inline:
+            return _parse_tool_list(inline)
+        tools: set[str] = set()
+        for nxt in lines[i + 1:]:
+            item = _BLOCK_ITEM_RE.match(nxt)
+            if not item:
+                break
+            tools |= _parse_tool_list(item.group(1))
+        return frozenset(tools) if tools else None
+    return None
 
 
 def _frontmatter_name(content: str | None) -> str | None:
@@ -118,8 +138,12 @@ def _check_monotonicity(write: SkillWrite) -> list[Finding]:
                              "allowed-tools")]
     added = new - old
     if added:
+        shown = sorted(added)
+        preview = ", ".join(_cap(t, 40) for t in shown[:5])
+        if len(shown) > 5:
+            preview += f", +{len(shown) - 5} more"
         return [veto_finding(Severity.HIGH, "permission-monotonicity",
-                             f"Patch widens allowed-tools: adds {sorted(added)} not in the prior set.",
+                             f"Patch widens allowed-tools: adds [{preview}] not in the prior set.",
                              "allowed-tools")]
     return []
 
@@ -135,8 +159,8 @@ def _check_identity(write: SkillWrite) -> list[Finding]:
     # frontmatter difference is a benign slip, not an identity mismatch (M2).
     if declared.casefold() != str(write.name).strip().casefold():
         return [veto_finding(Severity.MEDIUM, "identity",
-                             f"Frontmatter name {declared!r} does not match the write name "
-                             f"{write.name!r}; the declared identity must equal the requested identity.",
+                             f"Frontmatter name {_cap(declared)!r} does not match the write name "
+                             f"{_cap(write.name)!r}; the declared identity must equal the requested identity.",
                              "name")]
     return []
 

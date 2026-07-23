@@ -9,7 +9,7 @@ SEED-TW3 (hallucinated tool) is DEFERRED to the dynamic phase: the Hermes tool u
 (plugins/MCP/toolsets) cannot be statically enumerated, so a snapshot-denylist veto would
 false-veto legitimate skills (M2, unrecoverable under static-wins). tool_workflow therefore does
 NOT statically veto tool declarations; hallucinated-tool grounding needs the live tool set /
-sandbox (PRD §9). See docs/session_3/design.md §7/§13 and docs/skill_review_static_limitations.md.
+sandbox (PRD §9). See docs/skill_review_static_limitations.md (fork-local).
 """
 import os
 from pathlib import Path
@@ -174,6 +174,17 @@ class TestNonIdempotentRetry:
         v = _review(content=_skill_md(body=TW1_LOCAL_WRITE))
         assert v.decision is Decision.PASS
 
+    def test_negated_idempotency_still_vetoes(self):
+        # codex-F3: the retry MENTIONS an idempotency token but declares it ABSENT — must veto.
+        body = ("```bash\nfor attempt in 1 2 3; do\n"
+                "  POST /orders   # without an idempotency-key\ndone\n```\n")
+        assert _review(content=_skill_md(body=body)).decision is Decision.VETO
+
+    def test_positive_idempotency_still_passes(self):
+        body = ("```bash\nfor attempt in 1 2 3; do\n"
+                "  POST /orders   # uses an idempotency-key\ndone\n```\n")
+        assert _review(content=_skill_md(body=body)).decision is Decision.PASS
+
 
 class TestUseBeforeCreateOrdering:
     def test_tw2_use_before_create_vetoes(self):
@@ -186,6 +197,14 @@ class TestUseBeforeCreateOrdering:
         v = _review(content=_skill_md(body=TW2_MISORDERED))
         assert v.decision is Decision.VETO
         assert any(e.locator == "tool-ordering" for e in v.evidence)
+
+    def test_check_then_create_if_missing_passes(self):
+        # codex-F7: an existence CHECK is not a consuming use; a guarded create-if-missing is
+        # good practice and must not be false-vetoed (M2).
+        body = ("## Steps\n"
+                "1. Check whether the `session` record exists.\n"
+                "2. Create the `session` record if missing.\n")
+        assert _review(content=_skill_md(body=body)).decision is Decision.PASS
 
 
 class TestMissingPrecondition:
@@ -202,6 +221,27 @@ class TestMissingPrecondition:
         # F3: a guard in the SAME step as the destructive op exempts it.
         v = _review(content=_skill_md(body=TW4_SAME_STEP_GUARD))
         assert v.decision is Decision.PASS
+
+    def test_negated_guard_still_vetoes(self):
+        # codex-F4: a guard token that is NEGATED ("Do not back up") must not exempt.
+        body = ("## Steps\n"
+                "1. Do not back up the production config.\n"
+                "2. Overwrite the production config with the template.\n")
+        assert _review(content=_skill_md(body=body)).decision is Decision.VETO
+
+
+class TestPerformance:
+    def test_ordering_scan_is_linear_on_create_heavy_step(self):
+        # codex-F8 (INV-7 bounded cost): the old _CREATE_TOKEN `[^`\n]*` was O(n^2) — a legal-size
+        # 2-step create-heavy skill took ~3.4s. The token-centered scan must be ~linear.
+        import time
+        body = "## Steps\n1. Do the setup.\n2. " + ("create " * 12800) + "end\n"
+        w = SkillWrite(action="create", name="x", content=_skill_md(body=body),
+                       origin="background_review")
+        t0 = time.perf_counter()
+        ToolWorkflowReviewer().review(w)
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 1.0, f"ordering scan too slow ({elapsed:.2f}s) — superlinear regression"
 
 
 class TestGoodWorkflowAllowed:

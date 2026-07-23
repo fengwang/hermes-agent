@@ -16,7 +16,7 @@ DEFERRED to the dynamic phase (NOT statically vetoed):
     toolsets / dynamically-registered families) cannot be statically enumerated, so any
     snapshot-denylist would false-veto legitimate skills (M2, unrecoverable under static-wins).
     Grounding a tool reference needs the LIVE tool set / sandbox (PRD §9 "tool/workflow →
-    sandboxed replay"). See docs/session_3/design.md §7/§13.
+    sandboxed replay"). See docs/skill_review_static_limitations.md (fork-local).
   * **unsafe-shell / RCE** — OWNED by the security reviewer (E1 no double-penalty); not re-flagged.
 
 Patterns are tunable defaults calibrated in S5 (like S1/S2 statics). Depth is ``STATIC`` and every
@@ -43,9 +43,15 @@ from tools.skill_review.schema import (
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 _STEP_RE = re.compile(r"^[ \t]*(\d+)[.)]\s+(.*)$", re.M)
 _BACKTICK = re.compile(r"`([a-zA-Z][\w-]*)`")
-_CREATE_TOKEN = re.compile(
+# Verb proximity for use-before-create ordering: for each backticked token we inspect a BOUNDED
+# window of preceding text (codex-F8: a `verb…[^`]*`token` regex was O(n²) on adversarial input).
+_CREATE_VERB = re.compile(
     r"\b(?:create|creating|creates|define|defines|provision|provisions|generate|generates|"
-    r"initialize|initialise|set up|make|makes)\b[^`\n]*`([a-zA-Z][\w-]*)`", re.I)
+    r"initialize|initialise|set up|makes?)\b", re.I)
+_USE_VERB = re.compile(
+    r"\b(?:read|reads|reading|use|uses|using|reference|references|pass|passes|passing|"
+    r"consume|consumes|invoke|invokes|call|calls|load|loads|fetch|fetches)\b", re.I)
+_LOOKBACK_CHARS = 100
 
 # workflow-integrity signals (deliberately disjoint from security._UNSAFE_SHELL/_RCE and
 # safety._DESTRUCTIVE — E1). Tunable defaults (S5). The mutating set is scoped to non-idempotent
@@ -64,6 +70,12 @@ _WF_MUTATE = re.compile(
 _GUARD = re.compile(
     r"\b(?:verify|check|ensure|confirm|if exists|back(?: |-)?up|dry[- ]run|validate|precondition|"
     r"make sure)\b", re.I)
+# A guard/idempotency token that is negated ("without an idempotency key", "do not back up") must
+# NOT count as satisfied (codex-F3/F4). Checked in a small window immediately before the token.
+_NEGATION = re.compile(
+    r"\b(?:without|no|not|non|never|missing|lacking|absent|skip|skips|skipping|omit|omits|"
+    r"omitting|don'?t|doesn'?t)\b", re.I)
+_NEG_LOOKBACK = 25
 
 _SEVERITY_RANK = {
     Severity.CRITICAL: 4,
@@ -95,12 +107,31 @@ def _numbered_steps(text: str) -> list[str]:
     return [m.group(2) for m in _STEP_RE.finditer(text or "")]
 
 
+def _mentions_positively(text: str, pattern: re.Pattern) -> bool:
+    """True if ``pattern`` matches somewhere NOT immediately preceded by a negation (codex-F3/F4).
+
+    "uses an idempotency key" counts; "without an idempotency key" / "do not back up" do not.
+    """
+    for m in pattern.finditer(text):
+        preceding = text[max(0, m.start() - _NEG_LOOKBACK):m.start()]
+        if not _NEGATION.search(preceding):
+            return True
+    return False
+
+
+def _cap(value: object, limit: int = 64) -> str:
+    """Bound an author-controlled string before it enters verdict evidence (codex-F6)."""
+    s = str(value)
+    return s if len(s) <= limit else f"{s[:limit]}…(+{len(s) - limit} chars)"
+
+
 def _check_retry(text: str) -> list[Finding]:
     """Veto a single unit (a fenced block or a single step body) that retries a non-idempotent
     mutation with no idempotency guard. Co-occurrence is scoped to ONE unit so a retry in one step
-    and an unrelated mutation in another do not combine into a false veto (M2)."""
+    and an unrelated mutation in another do not combine into a false veto (M2). The idempotency
+    exemption must be stated POSITIVELY — "without an idempotency key" does not exempt (codex-F3)."""
     for unit in _fenced_blocks(text) + _numbered_steps(text):
-        if _RETRY.search(unit) and _MUTATING.search(unit) and not _IDEMPOTENT.search(unit):
+        if _RETRY.search(unit) and _MUTATING.search(unit) and not _mentions_positively(unit, _IDEMPOTENT):
             return [veto_finding(Severity.MEDIUM, "non-idempotent-retry",
                                  "Retries a non-idempotent mutation with no idempotency guard "
                                  "(idempotency key / if-not-exists); a retry may duplicate the effect.",
@@ -109,23 +140,31 @@ def _check_retry(text: str) -> list[Finding]:
 
 
 def _check_ordering(text: str) -> list[Finding]:
-    """Veto a step list that uses a resource before the step that creates it (by physical order)."""
+    """Veto a step list that uses a resource before the step that creates it (by physical order).
+
+    A backticked token is classified by the BOUNDED window of text immediately before it: a create
+    verb ⇒ created; a *consuming* verb ⇒ used. An existence/precondition check (no consuming verb,
+    e.g. "check whether `x` exists") is neither, so a guarded create-if-missing is not false-vetoed
+    (codex-F7). The bounded window keeps the scan linear (codex-F8)."""
     steps = _numbered_steps(text)
     if len(steps) < 2:
         return []
     created_at: dict[str, int] = {}
     used_at: dict[str, int] = {}
     for position, body in enumerate(steps):
-        for tok in _BACKTICK.findall(body):
-            used_at.setdefault(tok.lower(), position)
-        for m in _CREATE_TOKEN.finditer(body):
-            created_at.setdefault(m.group(1).lower(), position)
+        for m in _BACKTICK.finditer(body):
+            tok = m.group(1).lower()
+            window = body[max(0, m.start() - _LOOKBACK_CHARS):m.start()]
+            if _CREATE_VERB.search(window):
+                created_at.setdefault(tok, position)
+            elif _USE_VERB.search(window):
+                used_at.setdefault(tok, position)
     for tok in sorted(created_at):
         first_use = used_at.get(tok)
         if first_use is not None and first_use < created_at[tok]:
             return [veto_finding(Severity.MEDIUM, "tool-ordering",
-                                 f"Resource '{tok}' is used at step position {first_use + 1} before it "
-                                 f"is created at step position {created_at[tok] + 1} "
+                                 f"Resource {_cap(tok)!r} is used at step position {first_use + 1} "
+                                 f"before it is created at step position {created_at[tok] + 1} "
                                  "(use-before-create ordering).", "workflow")]
     return []
 
@@ -138,8 +177,9 @@ def _check_precondition(text: str) -> list[Finding]:
     mutating = next((pos for pos, body in enumerate(steps) if _WF_MUTATE.search(body)), None)
     if mutating is None:
         return []
-    # A guard in the mutating step itself (or an earlier one) exempts it (M2).
-    if any(_GUARD.search(body) for pos, body in enumerate(steps) if pos <= mutating):
+    # A POSITIVELY-stated guard in the mutating step itself (or an earlier one) exempts it (M2);
+    # a negated guard ("do not back up") does not (codex-F4).
+    if any(_mentions_positively(body, _GUARD) for pos, body in enumerate(steps) if pos <= mutating):
         return []
     return [veto_finding(Severity.MEDIUM, "missing-precondition",
                          f"Destructive workflow step at position {mutating + 1} runs with no "

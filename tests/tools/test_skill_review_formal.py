@@ -4,8 +4,7 @@ Covers SEED-FI1 (permission monotonicity, patch-delta), the net-new identity-con
 check, SEED-OK2 (curator consolidation allowed), determinism (M3), read-only behaviour
 (INV-4), the depth=static + deferred-checks note (exit crit. 3), and guard alignment
 (INV-6 / exit crit. 4 — the EXISTING owned-skill/pinned guards still fire independently
-while the reviewer defers). See docs/eval_seed_cases.md §2.4/§3 and docs/session_3/design.md
-§6/§8/§11.
+while the reviewer defers). Rationale: docs/skill_review_static_limitations.md (fork-local).
 """
 import os
 from pathlib import Path
@@ -258,13 +257,73 @@ class TestGuardsIntact:
         # The formal reviewer defers owned-skill (it does not read created_by): benign patch PASSes.
         assert FormalInvariantsReviewer().review(self._defer_write("user-skill")).decision is Decision.PASS
 
+    def test_read_before_write_guard_fires_and_reviewer_defers(self):
+        # codex-F5 / contract acceptance: the read-before-write guard is named in the contract but
+        # was untested. Drive the REAL guard (background origin + an unread target) and assert the
+        # reviewer defers (it does not implement read-before-write).
+        from tools.skill_manager_tool import _background_review_read_before_write_guard
+        from tools.skill_provenance import (
+            BACKGROUND_REVIEW, reset_current_write_origin, set_current_write_origin,
+        )
+        token = set_current_write_origin(BACKGROUND_REVIEW)
+        try:
+            refusal = _background_review_read_before_write_guard(
+                "unread-skill", Path("/nonexistent/skills/unread-skill/SKILL.md"), "patch", "SKILL.md")
+        finally:
+            reset_current_write_origin(token)
+        assert refusal is not None and refusal["success"] is False
+        assert refusal.get("_read_before_write_required") is True
+        assert FormalInvariantsReviewer().review(self._defer_write("unread-skill")).decision is Decision.PASS
 
-class TestDocumentedLimitations:
-    def test_block_style_allowed_tools_widening_is_not_caught(self):
-        # Documented static limitation (R15; S2 handoff L7): monotonicity parses the inline
-        # `allowed-tools: [...]` form. A YAML block-list widening is NOT vetoed — the check is
-        # defense-in-depth, not a guarantee. See docs/skill_review_static_limitations.md.
+    def test_fi4_create_collision_guard_fires_and_reviewer_defers(self):
+        # codex-F5: FI4 name-collision is enforced by _create_skill (_find_skill), not the reviewer.
+        from tools.skill_manager_tool import _create_skill
+        content = _skill_md(name="collide-skill")
+        assert _create_skill("collide-skill", content).get("success") is True
+        collision = _create_skill("collide-skill", content)
+        assert collision.get("success") is False
+        assert "already exists" in collision["error"].lower()
+        # The formal reviewer does not check collision (needs the filesystem) — it defers.
+        write = SkillWrite(action="create", name="collide-skill", content=content,
+                           origin="background_review")
+        assert FormalInvariantsReviewer().review(write).decision is Decision.PASS
+
+
+class TestBlockStyleMonotonicity:
+    """codex-F2: block-style YAML allowed-tools must be parsed too, else widening evades the veto."""
+
+    def test_block_style_widening_vetoes(self):
         old = "allowed-tools:\n  - Read\n"
         new = "allowed-tools:\n  - Read\n  - Bash\n"
-        v = _review(action="patch", name="x", old_string=old, new_string=new)
-        assert v.decision is Decision.PASS
+        assert _review(action="patch", name="x", old_string=old, new_string=new).decision is Decision.VETO
+
+    def test_inline_to_block_reformat_same_set_passes(self):
+        # Pure reformat (no widening) must NOT veto (M2).
+        old = "allowed-tools: [Read, Bash]"
+        new = "allowed-tools:\n  - Read\n  - Bash\n"
+        assert _review(action="patch", name="x", old_string=old, new_string=new).decision is Decision.PASS
+
+    def test_block_to_inline_reformat_same_set_passes(self):
+        old = "allowed-tools:\n  - Read\n  - Bash\n"
+        new = "allowed-tools: [Bash, Read]"
+        assert _review(action="patch", name="x", old_string=old, new_string=new).decision is Decision.PASS
+
+
+class TestEvidenceBounds:
+    """codex-F6: author-controlled strings must be capped before entering verdict evidence."""
+
+    def test_added_tool_name_is_capped(self):
+        huge = "x" * 5000
+        v = _review(action="patch", name="s",
+                    old_string="allowed-tools: [Read]",
+                    new_string=f"allowed-tools: [Read, {huge}]")
+        assert v.decision is Decision.VETO
+        detail = " ".join(e.detail for e in v.evidence)
+        assert huge not in detail
+
+    def test_frontmatter_name_is_capped(self):
+        huge = "y" * 5000
+        v = _review(action="create", name="s", content=_skill_md(name=huge))
+        assert v.decision is Decision.VETO
+        detail = " ".join(e.detail for e in v.evidence)
+        assert huge not in detail
