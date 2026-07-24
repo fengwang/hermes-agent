@@ -1286,6 +1286,30 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
     if _skill_gate_bypass.get():
         return None
 
+    # Orthogonal-reviewer quality gate (skills.review_gate.*): independent of write_approval
+    # and default-off. Runs FIRST so a hard-veto blocks before any human-approval staging;
+    # a pass falls through unchanged. For agent-origin writes only (foreground returns allow
+    # inside review_skill_write). A broken install degrades to feature-absent (pre-feature).
+    try:
+        from tools.skill_review import gate as _review_gate
+    except Exception:
+        # A broken install degrades to feature-absent (pre-feature behavior). Log so an
+        # operator who *enabled* the gate can see it silently isn't running.
+        logger.warning("skill review gate import failed; skipping review", exc_info=True)
+        _review_gate = None
+    if _review_gate is not None:
+        _rg = _review_gate.review_skill_write(
+            action, name,
+            content=payload_kwargs.get("content"),
+            file_path=payload_kwargs.get("file_path"),
+            file_content=payload_kwargs.get("file_content"),
+            old_string=payload_kwargs.get("old_string"),
+            new_string=payload_kwargs.get("new_string"),
+            replace_all=payload_kwargs.get("replace_all", False),
+        )
+        if _rg.blocked:
+            return tool_error(_rg.message, success=False)
+
     try:
         from tools import write_approval as wa
     except Exception:

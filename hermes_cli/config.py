@@ -2454,6 +2454,33 @@ DEFAULT_CONFIG = {
         #                     never crammed into a chat bubble), apply with
         #                     /skills approve <id> or drop with /skills reject <id>.
         "write_approval": False,
+        # Orthogonal-reviewer quality gate for AGENT-CREATED skill writes
+        # (background self-improvement fork + curator). Independent of
+        # write_approval. When enabled, a small panel of hard-veto reviewers
+        # inspects each agent-origin create/edit/patch/write_file and blocks
+        # clearly-bad skills before they go active; foreground writes are never
+        # gated. Uniformly fail-closed (a reviewer error/timeout blocks). See
+        # docs/skill_review_config.md.
+        "review_gate": {
+            #   false (default) — gate off; behaviour is byte-identical to
+            #                     pre-feature (kill-switch / reversibility).
+            #   true            — consult the reviewer panel for agent writes.
+            "enabled": False,
+            # Hard wall-clock bound (seconds) for the whole panel on one write.
+            # If exceeded, the write is blocked as reviewer-unavailable (the
+            # background fork is off the user's critical path, so worst case is
+            # "skill not saved this pass"). Tunable; calibrate on real traces.
+            "deadline_seconds": 30,
+            # Per-reviewer toggles (all on by default). Turning one off removes
+            # it from the panel; the remaining reviewers still gate.
+            "reviewers": {
+                "contract": True,
+                "formal": True,
+                "tool_workflow": True,
+                "security": True,
+                "safety": True,
+            },
+        },
     },
 
     # Curator — background skill maintenance.
