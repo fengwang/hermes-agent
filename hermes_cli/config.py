@@ -2471,6 +2471,11 @@ DEFAULT_CONFIG = {
             # background fork is off the user's critical path, so worst case is
             # "skill not saved this pass"). Tunable; calibrate on real traces.
             "deadline_seconds": 30,
+            # Bounded retry budget: total panel attempts per write. A retry only
+            # fires on an infra/reviewer failure (never a genuine veto), within
+            # the deadline budget. Default 1 = no extra retry (rely on the
+            # auxiliary client's own internal retry). Clamped to [1, 5].
+            "max_attempts": 1,
             # Per-reviewer toggles (all on by default). Turning one off removes
             # it from the panel; the remaining reviewers still gate.
             "reviewers": {

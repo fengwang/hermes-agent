@@ -1276,6 +1276,20 @@ _skill_gate_bypass: "_ctxvars.ContextVar[bool]" = _ctxvars.ContextVar(
 )
 
 
+def _review_gate_enabled_fallback() -> bool:
+    """Read ``skills.review_gate.enabled`` WITHOUT importing ``tools.skill_review`` — used only
+    when that package itself failed to import, to decide fail-closed (enabled) vs
+    feature-absent (disabled). Mirrors the tolerant bool parsing of the review-gate config."""
+    try:
+        from hermes_cli.config import cfg_get, load_config
+        raw = cfg_get(load_config(), "skills", "review_gate", "enabled", default=False)
+    except Exception:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    return isinstance(raw, str) and raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _apply_skill_write_gate(action, name, **payload_kwargs):
     """Evaluate the skill write gate. Returns a JSON tool-result string when the
     write should NOT proceed (blocked or staged), or None to perform the real
@@ -1289,15 +1303,9 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
     # Orthogonal-reviewer quality gate (skills.review_gate.*): independent of write_approval
     # and default-off. Runs FIRST so a hard-veto blocks before any human-approval staging;
     # a pass falls through unchanged. For agent-origin writes only (foreground returns allow
-    # inside review_skill_write). A broken install degrades to feature-absent (pre-feature).
+    # inside review_skill_write).
     try:
         from tools.skill_review import gate as _review_gate
-    except Exception:
-        # A broken install degrades to feature-absent (pre-feature behavior). Log so an
-        # operator who *enabled* the gate can see it silently isn't running.
-        logger.warning("skill review gate import failed; skipping review", exc_info=True)
-        _review_gate = None
-    if _review_gate is not None:
         _rg = _review_gate.review_skill_write(
             action, name,
             content=payload_kwargs.get("content"),
@@ -1309,6 +1317,17 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
         )
         if _rg.blocked:
             return tool_error(_rg.message, success=False)
+    except Exception:
+        # The review-gate package failed to load or run. Fail CLOSED if it is ENABLED for this
+        # agent-origin gated write (INV-7 — never silently bypass an enabled security control);
+        # otherwise degrade to feature-absent (pre-feature behavior).
+        logger.warning("skill review gate unavailable", exc_info=True)
+        if action in {"create", "edit", "patch", "write_file"} and _review_gate_enabled_fallback():
+            from tools.skill_provenance import is_background_review
+            if is_background_review():
+                return tool_error(
+                    "Skill review gate is enabled but unavailable (failed to load); "
+                    "blocked fail-closed.", success=False)
 
     try:
         from tools import write_approval as wa

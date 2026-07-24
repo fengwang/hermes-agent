@@ -131,13 +131,14 @@ class TestWriteRejection:
 
         monkeypatch.setattr(record, "get_hermes_home", lambda: tmp_path)
         rec = _record(_verdict("security", "shell"))
-        key = record.write_rejection(rec, reason="veto", quality_signal=True, reviewable="c")
+        key = record.write_rejection(rec, reason="blocked-by-veto", subreason="veto", quality_signal=True, reviewable="c")
 
         path = tmp_path / "skill_review" / "rejections" / f"{key}.json"
         assert path.exists()
         import json
         payload = json.loads(path.read_text())
-        assert payload["reason"] == "veto"
+        assert payload["reason"] == "blocked-by-veto"      # contract label (INV-8)
+        assert payload["subreason"] == "veto"               # finer internal detail
         assert payload["quality_signal"] is True
         assert payload["decision"] == "veto"
         assert "created_at" not in payload  # no wall-clock (deterministic record)
@@ -147,8 +148,8 @@ class TestWriteRejection:
 
         monkeypatch.setattr(record, "get_hermes_home", lambda: tmp_path)
         rec = _record(_verdict("security", "shell"))
-        record.write_rejection(rec, reason="veto", quality_signal=True, reviewable="c")
-        record.write_rejection(rec, reason="veto", quality_signal=True, reviewable="c")
+        record.write_rejection(rec, reason="blocked-by-veto", subreason="veto", quality_signal=True, reviewable="c")
+        record.write_rejection(rec, reason="blocked-by-veto", subreason="veto", quality_signal=True, reviewable="c")
         files = list((tmp_path / "skill_review" / "rejections").glob("*.json"))
         assert len(files) == 1
 
@@ -161,7 +162,7 @@ class TestWriteRejection:
         monkeypatch.setattr(record, "get_hermes_home", boom)
         rec = _record(_verdict("security", "shell"))
         # must not raise
-        assert record.write_rejection(rec, reason="veto", quality_signal=True, reviewable="c") is None
+        assert record.write_rejection(rec, reason="blocked-by-veto", subreason="veto", quality_signal=True, reviewable="c") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -463,3 +464,39 @@ class TestReadCurrentTraversal:
         assert gate._read_current("s", None) == "hello"
         # a traversal file_path is refused (same guard as _patch_skill), never read
         assert gate._read_current("s", "../../../../etc/passwd") is None
+
+
+# --------------------------------------------------------------------------- #
+# Codex F1 — the review SHAPE must follow the target file
+# --------------------------------------------------------------------------- #
+def _contract_panel():
+    from tools.skill_review.panel import Panel as _Panel
+    from tools.skill_review.reviewers.contract import ContractReviewer
+    return _Panel([ContractReviewer()])
+
+
+class TestReviewShapeByTarget:
+    def test_patch_to_supporting_file_not_false_vetoed(self, bg, tmp_path, monkeypatch):
+        # A supporting-file patch must NOT be demanded to have SKILL.md frontmatter.
+        monkeypatch.setattr(record, "get_hermes_home", lambda: tmp_path)
+        monkeypatch.setattr(gate, "_read_current", lambda name, fp: "old note text")
+        monkeypatch.setattr(gate, "_build_panel", _contract_panel)
+        decision = gate.review_skill_write("patch", "s", file_path="references/note.md",
+                                           old_string="old note text", new_string="new note text")
+        assert decision.allow is True
+
+    def test_write_file_to_skill_md_invalid_is_vetoed(self, bg, tmp_path, monkeypatch):
+        # write_file targeting SKILL.md IS the main skill → frontmatter required (was a slip).
+        monkeypatch.setattr(record, "get_hermes_home", lambda: tmp_path)
+        monkeypatch.setattr(gate, "_build_panel", _contract_panel)
+        decision = gate.review_skill_write("write_file", "s", file_path="SKILL.md",
+                                           file_content="not yaml")
+        assert decision.blocked is True
+
+    def test_write_file_to_skill_md_valid_passes(self, bg, tmp_path, monkeypatch):
+        monkeypatch.setattr(record, "get_hermes_home", lambda: tmp_path)
+        monkeypatch.setattr(gate, "_build_panel", _contract_panel)
+        valid = "---\nname: s\ndescription: A reusable class-level capability.\n---\n\n# S\nBody.\n"
+        decision = gate.review_skill_write("write_file", "s", file_path="SKILL.md",
+                                           file_content=valid)
+        assert decision.allow is True
