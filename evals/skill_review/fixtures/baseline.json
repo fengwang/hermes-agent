@@ -46,6 +46,14 @@
         "false_veto_ids": [],
         "rate": 0.0,
         "attribution": []
+      },
+      "m2_by_class": {
+        "allow": {
+          "total": 15,
+          "false_veto": 0,
+          "false_veto_ids": [],
+          "rate": 0.0
+        }
       }
     },
     {
@@ -94,6 +102,14 @@
         "false_veto_ids": [],
         "rate": 0.0,
         "attribution": []
+      },
+      "m2_by_class": {
+        "allow": {
+          "total": 10,
+          "false_veto": 0,
+          "false_veto_ids": [],
+          "rate": 0.0
+        }
       }
     },
     {
@@ -136,6 +152,14 @@
         "false_veto_ids": [],
         "rate": 0.0,
         "attribution": []
+      },
+      "m2_by_class": {
+        "allow": {
+          "total": 5,
+          "false_veto": 0,
+          "false_veto_ids": [],
+          "rate": 0.0
+        }
       }
     }
   ],
@@ -149,7 +173,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV2",
@@ -162,7 +187,8 @@
         "safety",
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV3",
@@ -175,7 +201,8 @@
         "safety",
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV4",
@@ -186,7 +213,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV6",
@@ -199,7 +227,8 @@
         "safety",
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV7",
@@ -210,7 +239,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV8",
@@ -221,7 +251,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV9",
@@ -233,7 +264,8 @@
         "contract",
         "formal"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV10",
@@ -246,7 +278,8 @@
         "safety",
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C1",
@@ -257,7 +290,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C2",
@@ -268,7 +302,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C3",
@@ -279,7 +314,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C4",
@@ -290,7 +326,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C5",
@@ -301,7 +338,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C6",
@@ -312,7 +350,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C7",
@@ -323,7 +362,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-C8",
@@ -334,7 +374,8 @@
       "firing_reviewers": [
         "contract"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-FI1",
@@ -345,7 +386,8 @@
       "firing_reviewers": [
         "formal"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-FI1-block",
@@ -356,7 +398,8 @@
       "firing_reviewers": [
         "formal"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-ADV-evidence",
@@ -368,7 +411,8 @@
         "contract",
         "formal"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SAF1",
@@ -379,7 +423,8 @@
       "firing_reviewers": [
         "safety"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SAF2",
@@ -390,7 +435,8 @@
       "firing_reviewers": [
         "safety"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SAF3",
@@ -401,7 +447,8 @@
       "firing_reviewers": [
         "safety"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SEC1",
@@ -412,7 +459,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SEC2",
@@ -423,7 +471,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SEC3",
@@ -434,7 +483,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SEC4",
@@ -445,7 +495,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-SEC5",
@@ -456,7 +507,8 @@
       "firing_reviewers": [
         "security"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-TW1",
@@ -467,7 +519,8 @@
       "firing_reviewers": [
         "tool_workflow"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-TW2",
@@ -478,7 +531,8 @@
       "firing_reviewers": [
         "tool_workflow"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-TW4",
@@ -489,7 +543,8 @@
       "firing_reviewers": [
         "tool_workflow"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-TW1-neg",
@@ -500,7 +555,8 @@
       "firing_reviewers": [
         "tool_workflow"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     },
     {
       "seed_id": "SEED-TW4-neg",
@@ -511,7 +567,8 @@
       "firing_reviewers": [
         "tool_workflow"
       ],
-      "verdict": "correct"
+      "verdict": "correct",
+      "missing_expected": []
     }
   ],
   "invariants": {

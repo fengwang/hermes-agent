@@ -16,9 +16,12 @@ python -m evals.skill_review.harness --report --out ./skill_review_eval_report
 - `--out DIR` — report output directory (uncommitted; default `./skill_review_eval_report`).
 - `--runs N` — determinism runs for M3 (default 3).
 - `--live` — also run the LLM reviewers against the **real** model and log a canned-vs-live delta
-  (never gates; requires credentials — CI never uses this).
-- `--write-holdout` — (dev) regenerate `fixtures/holdout.yaml` from the corpus.
-- `--write-baseline` — (dev) rewrite `fixtures/baseline.json` from the current metrics.
+  (never gates; CI never uses this). **Requires `SKILL_REVIEW_EVAL_ALLOW_LIVE=1`** (an explicit
+  egress opt-in) and **refuses unsanitized `trace:*` seeds** so real-secret-bearing trace content is
+  never sent to a provider. `--live-limit N` caps how many seeds are sent (cost bound).
+- `--write-holdout` / `--write-baseline` / `--write-inventory` — (dev) regenerate the frozen
+  `fixtures/{holdout.yaml,baseline.json,inventory.json}`. `--write-baseline` and `--write-inventory`
+  **refuse to write from a FAILED run** so a miss/drift can never be frozen as the accepted state.
 
 The process **exit code is non-zero** when a CI hard-fail condition is met (see CI below).
 
@@ -88,11 +91,16 @@ The guards are proven intact by the S3/S4 anchors
 
 ## Known limitations
 
-- **Patch fidelity (D2).** For `patch` seeds the harness feeds the natural patch-shaped
+- **Patch fidelity (D2 / codex-F6).** For `patch` seeds the harness feeds the natural patch-shaped
   `SkillWrite`; it does **not** replicate the live gate's post-image reconstruction (`edit`-shape +
   supplementary formal-delta). Every current patch seed is resolved by a deterministic reviewer on
   the delta or is a benign allow, so this is exact for the current corpus; the gate-shaping path is
-  covered by the S4 gate anchors (SEED-ADV10/16 in the S4 corpus).
+  covered by the S4 gate anchors (SEED-ADV10/16 in the S4 corpus). This is a deliberate scope
+  decision (design D1/D2, interview-confirmed) — the gate's post-image path is S4's concern.
+  **Future patch seeds** whose verdict depends on the LLM seeing a full post-image (not just the
+  delta) MUST either supply `current_content`/post-image (a future harness enhancement) or be marked
+  deferred and excluded from calibration metrics — do not score them against the delta and treat the
+  result as gate-faithful.
 - **Synthetic corpus.** All seeds are hand-authored and most informed the reviewer design in
   S1–S4, so the holdout's independence is *partial*. Real independence arrives with trace-derived
   seeds (`source: trace:<ref>`), which then land in the holdout.
@@ -133,6 +141,15 @@ Frozen (never edited by calibration): `schema.py`, `panel.py`, `reviewers/base.p
 
 Runs fully offline (no provider credentials) on changes to `evals/**`, `tools/skill_review/**`, or
 `tests/evals/**`. It runs the unit tests, then generates the report, and goes **red** on: M3
-determinism break, injection attack-success ≠ 0, ADV5 mislabel, deterministic-class missed-bad > 0,
-or holdout M1/M2 regression vs the committed baseline. The `report.md`/`report.json` are uploaded as
-a build artifact (even on failure). It never blocks the live write path.
+determinism break, injection attack-success ≠ 0, ADV5 mislabel, deterministic missed-bad > 0
+(any class, via `veto_kind`), holdout M1/M2 regression vs the committed baseline, or corpus/holdout
+integrity drift (inventory + holdout-hash + `veto_kind`-vs-derived-mechanism). The
+`report.md`/`report.json` are uploaded as a build artifact (even on failure). It never blocks the
+live write path.
+
+**Required-gate wiring (codex-F8, follow-up).** The workflow exposes `workflow_call`, so it can be
+added to `ci.yml`'s `all-checks-pass` aggregate as a `needs:` dependency. Doing so — and updating
+branch protection — is **outside the S5 blast radius** (only `skill_review_eval.yml` is editable
+this session), so it is a **human-approved follow-up**: either add the eval job to `ci.yml`'s
+aggregate, or require the `Skill-Review Eval (offline)` check in branch protection. Until then the
+eval runs as a standalone (advisory) workflow.

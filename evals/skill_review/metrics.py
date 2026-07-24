@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass
 
 from tools.skill_review.gate import classify_block
-from tools.skill_review.schema import DecisionRecord
+from tools.skill_review.schema import DecisionRecord, Depth
 
 # Reviewers whose verdicts must be byte-identical across runs (M3). Mirrors the panel's
 # ``GraderType.DETERMINISTIC`` set by id; the frozen reviewers advertise these ids.
@@ -54,11 +54,15 @@ class SeedResult:
     enforcement: str            # reviewer | guard | dynamic
     expected_decision: str      # allow | veto | blocked-unavailable
     expected_reviewers: tuple[str, ...]
-    veto_kind: str              # deterministic | llm (a veto's enforcement mechanism)
+    veto_kind: str              # deterministic | llm (a veto's CLAIMED enforcement mechanism)
     blocked: bool
     firing_reviewers: tuple[str, ...]
     label: str | None           # LABEL_VETO | LABEL_UNAVAILABLE | None (not blocked)
     deterministic_signature: str
+    # The mechanism that ACTUALLY blocked, DERIVED from the verdicts (not trusted from the fixture,
+    # codex-F4): "deterministic" if any blocking verdict is from a deterministic reviewer or is
+    # static-depth; "llm" if blocked only by FULL-depth LLM verdicts; None if not blocked.
+    actual_veto_mechanism: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,7 +93,8 @@ class M2Result:
 class SplitMetrics:
     name: str                                  # all | dev | holdout
     m1: tuple[ClassM1, ...]
-    m2: M2Result
+    m2: M2Result                               # aggregate over all should-allow seeds (summary)
+    m2_by_class: tuple[tuple[str, M2Result], ...] = ()   # per should-allow class (codex-F2)
 
 
 @dataclass(frozen=True)
@@ -98,7 +103,8 @@ class ConfusionEntry:
     cls: str
     expected_reviewers: tuple[str, ...]
     firing_reviewers: tuple[str, ...]
-    verdict: str                               # correct | misattributed | missed
+    verdict: str                               # correct | partial | misattributed | missed
+    missing_expected: tuple[str, ...] = ()     # expected reviewers that did NOT fire (codex-F3)
 
 
 @dataclass(frozen=True)
@@ -142,13 +148,17 @@ class Metrics:
                     "m2": {"total": s.m2.total, "false_veto": s.m2.false_veto,
                            "false_veto_ids": list(s.m2.false_veto_ids), "rate": s.m2.rate,
                            "attribution": [list(a) for a in s.m2.attribution]},
+                    "m2_by_class": {cls: {"total": m2.total, "false_veto": m2.false_veto,
+                                          "false_veto_ids": list(m2.false_veto_ids), "rate": m2.rate}
+                                    for cls, m2 in s.m2_by_class},
                 }
                 for s in self.splits
             ],
             "confusion": [
                 {"seed_id": e.seed_id, "cls": e.cls,
                  "expected_reviewers": list(e.expected_reviewers),
-                 "firing_reviewers": list(e.firing_reviewers), "verdict": e.verdict}
+                 "firing_reviewers": list(e.firing_reviewers), "verdict": e.verdict,
+                 "missing_expected": list(e.missing_expected)}
                 for e in self.confusion
             ],
             "invariants": {
@@ -222,7 +232,24 @@ def to_seed_result(*, seed_id: str, cls: str, enforcement: str, expected_decisio
         expected_decision=expected_decision, expected_reviewers=tuple(expected_reviewers),
         veto_kind=veto_kind, blocked=blocked, firing_reviewers=firing, label=label,
         deterministic_signature=signature,
+        actual_veto_mechanism=_actual_mechanism(records),
     )
+
+
+def _actual_mechanism(records: tuple[DecisionRecord, ...]) -> str | None:
+    """DERIVE how a blocked seed was actually vetoed, from the verdicts (codex-F4).
+
+    'deterministic' if ANY blocking verdict is from a deterministic reviewer OR is static-depth
+    (a security/safety static-wins veto is deterministic); 'llm' if blocked ONLY by FULL-depth
+    verdicts from the LLM reviewers; None if not blocked. Used to validate the fixture's CLAIMED
+    ``veto_kind`` against reality so a mislabel cannot silently exempt a static veto from the gate.
+    """
+    blocking = [v for r in records if r.is_blocked for v in r.blocking_verdicts()]
+    if not blocking:
+        return None
+    if any(v.reviewer in DETERMINISTIC_REVIEWER_IDS or v.depth is Depth.STATIC for v in blocking):
+        return "deterministic"
+    return "llm"
 
 
 # --------------------------------------------------------------------------- #
@@ -251,8 +278,7 @@ def _m1_for(subset: list[SeedResult]) -> tuple[ClassM1, ...]:
     return tuple(out)
 
 
-def _m2_for(subset: list[SeedResult]) -> M2Result:
-    allow = [r for r in subset if r.expected_decision == "allow"]
+def _m2_over(allow: list[SeedResult]) -> M2Result:
     blocked = [r for r in allow if r.blocked]
     attribution = tuple(
         (r.seed_id, reviewer) for r in blocked for reviewer in r.firing_reviewers
@@ -263,26 +289,46 @@ def _m2_for(subset: list[SeedResult]) -> M2Result:
 
 
 def _split_metrics(name: str, subset: list[SeedResult]) -> SplitMetrics:
-    return SplitMetrics(name=name, m1=_m1_for(subset), m2=_m2_for(subset))
+    allow = [r for r in subset if r.expected_decision == "allow"]
+    by_class = tuple((cls, _m2_over([r for r in allow if r.cls == cls]))
+                     for cls in sorted({r.cls for r in allow}))   # per-class M2 (codex-F2)
+    return SplitMetrics(name=name, m1=_m1_for(subset), m2=_m2_over(allow), m2_by_class=by_class)
 
 
 def _confusion(results: list[SeedResult]) -> tuple[ConfusionEntry, ...]:
-    """Per reviewer-enforced should-veto seed: did the RIGHT reviewer fire?"""
+    """Per reviewer-enforced should-veto seed: did EVERY expected reviewer fire? A multi-reviewer
+    seed where only SOME expected reviewers fired is ``partial`` (not ``correct``) — codex-F3."""
     veto = [r for r in results if r.expected_decision == "veto" and r.enforcement == "reviewer"]
     out: list[ConfusionEntry] = []
     for r in veto:
         expected = set(r.expected_reviewers)
         fired = set(r.firing_reviewers)
+        missing = tuple(sorted(expected - fired))
         if not r.blocked:
             verdict = "missed"
+        elif not expected:
+            verdict = "correct"                # no expected reviewer specified; blocked is enough
+        elif expected <= fired:
+            verdict = "correct"                # ALL expected reviewers fired
         elif expected & fired:
-            verdict = "correct"                # an expected reviewer fired (others may too)
+            verdict = "partial"                # some expected fired, some missing (still blocked)
         else:
-            verdict = "misattributed"          # blocked, but only by an unexpected reviewer
+            verdict = "misattributed"          # blocked, but no expected reviewer fired
         out.append(ConfusionEntry(seed_id=r.seed_id, cls=r.cls,
                                   expected_reviewers=r.expected_reviewers,
-                                  firing_reviewers=r.firing_reviewers, verdict=verdict))
+                                  firing_reviewers=r.firing_reviewers, verdict=verdict,
+                                  missing_expected=missing))
     return tuple(out)
+
+
+def veto_kind_mismatches(results: list[SeedResult]) -> tuple[str, ...]:
+    """Fixture ``veto_kind`` vs the DERIVED actual mechanism, for BLOCKED reviewer-enforced veto
+    seeds (codex-F4). A mismatch (e.g. a static veto mislabeled ``llm`` to dodge the deterministic
+    gate, or an LLM veto mislabeled ``deterministic``) is a corpus-integrity failure."""
+    return tuple(sorted(
+        r.seed_id for r in results
+        if r.expected_decision == "veto" and r.enforcement == "reviewer" and r.blocked
+        and r.actual_veto_mechanism is not None and r.actual_veto_mechanism != r.veto_kind))
 
 
 def _invariants(results: list[SeedResult]) -> InvariantResults:

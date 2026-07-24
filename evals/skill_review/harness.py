@@ -18,6 +18,8 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
+import re
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -48,6 +50,17 @@ class CannedKind(str, Enum):
 class FixtureError(ValueError):
     """A malformed / inconsistent fixture. Propagated (never swallowed): a silently dropped
     seed would make M1 look better than reality (adversarial case in the session contract)."""
+
+
+# --- fixture schema enums (codex-F1: a typo must FAIL, never silently miscategorize a seed) ---
+_VALID_DECISION = frozenset({"allow", "veto", "blocked-unavailable"})
+_VALID_ENFORCEMENT = frozenset({"reviewer", "guard", "dynamic"})
+_VALID_VETO_KIND = frozenset({"deterministic", "llm"})
+_VALID_CLS = frozenset({"contract", "security", "safety", "formal",
+                        "tool_workflow", "adversarial", "allow"})
+_VALID_REVIEWERS = frozenset({"contract", "security", "safety", "formal", "tool_workflow"})
+_VALID_LLM_TASKS = frozenset({"skill_review_security", "skill_review_safety"})
+_SEED_ID_RE = re.compile(r"^SEED-[A-Za-z0-9._-]+$")   # markdown/table-cell safe (no '|', spaces)
 
 
 class MissingCannedResponse(BaseException):
@@ -95,6 +108,7 @@ class Seed:
     writes: tuple[SkillWriteSpec, ...]
     llm: dict[str, CannedResponse] = field(default_factory=dict)   # task -> canned
     veto_kind: str = "deterministic"   # deterministic | llm — a should-veto seed's veto mechanism
+    sanitized: bool = False            # trace-derived seeds must be scrubbed before --live egress (F5)
 
 
 @dataclass(frozen=True)
@@ -153,24 +167,49 @@ def _parse_write(raw: dict) -> SkillWriteSpec:
     return spec
 
 
+def _enum(sid: str, field_name: str, value: str, valid: frozenset[str]) -> str:
+    if value not in valid:
+        raise FixtureError(f"seed {sid!r}: {field_name}={value!r} is not one of {sorted(valid)}")
+    return value
+
+
 def _parse_seed(d: dict) -> Seed:
     for key in _REQUIRED_SEED_FIELDS:
         if key not in d:
             raise FixtureError(f"seed missing required field {key!r}: {d.get('id', d)!r}")
+    sid = str(d["id"])
+    if not _SEED_ID_RE.match(sid):
+        raise FixtureError(f"seed id {sid!r} must match ^SEED-[A-Za-z0-9._-]+$ (markdown-safe)")
+    cls = _enum(sid, "cls", str(d["cls"]), _VALID_CLS)
+    decision = _enum(sid, "expected_decision", str(d["expected_decision"]), _VALID_DECISION)
+    enforcement = _enum(sid, "enforcement", str(d.get("enforcement", "reviewer")), _VALID_ENFORCEMENT)
+    veto_kind = _enum(sid, "veto_kind", str(d.get("veto_kind", "deterministic")), _VALID_VETO_KIND)
+    reviewers = tuple(str(x) for x in (d.get("expected_reviewers") or ()))
+    for rv in reviewers:
+        _enum(sid, "expected_reviewer", rv, _VALID_REVIEWERS)
+    # cross-field: a reviewer-enforced should-veto seed MUST name who catches it (else confusion
+    # cannot attribute and a mislabel goes unnoticed) — codex-F1 cross-field invariant.
+    if decision == "veto" and enforcement == "reviewer" and not reviewers:
+        raise FixtureError(f"seed {sid!r}: a reviewer-enforced veto needs non-empty expected_reviewers")
+    source = str(d.get("source", "")).strip()
+    rationale = str(d.get("rationale", "")).strip()
+    if not source or not rationale:
+        raise FixtureError(f"seed {sid!r}: 'source' and 'rationale' are required")
     raw_writes = d.get("writes")
     if not raw_writes:
-        raise FixtureError(f"seed {d['id']!r}: at least one write is required")
+        raise FixtureError(f"seed {sid!r}: at least one write is required")
     try:
         writes = tuple(_parse_write(w) for w in raw_writes)
     except TypeError as exc:
-        raise FixtureError(f"seed {d['id']!r}: bad write spec ({exc})") from exc
-    llm = {task: _parse_canned(task, c) for task, c in (d.get("llm") or {}).items()}
+        raise FixtureError(f"seed {sid!r}: bad write spec ({exc})") from exc
+    llm: dict[str, CannedResponse] = {}
+    for task, c in (d.get("llm") or {}).items():
+        _enum(sid, "llm task", str(task), _VALID_LLM_TASKS)
+        llm[str(task)] = _parse_canned(str(task), c)
     return Seed(
-        id=str(d["id"]), cls=str(d["cls"]), expected_decision=str(d["expected_decision"]),
-        expected_reviewers=tuple(d.get("expected_reviewers") or ()),
-        enforcement=str(d.get("enforcement", "reviewer")),
-        source=str(d.get("source", "")), rationale=str(d.get("rationale", "")),
-        writes=writes, llm=llm, veto_kind=str(d.get("veto_kind", "deterministic")),
+        id=sid, cls=cls, expected_decision=decision, expected_reviewers=reviewers,
+        enforcement=enforcement, source=source, rationale=rationale,
+        writes=writes, llm=llm, veto_kind=veto_kind, sanitized=bool(d.get("sanitized", False)),
     )
 
 
@@ -394,13 +433,19 @@ def write_holdout_manifest(fixtures_dir: Path, corpus: Corpus) -> frozenset[str]
 # CI verdict (pure) + evaluation façade
 # --------------------------------------------------------------------------- #
 def check_holdout_integrity(corpus: Corpus) -> tuple[str, ...]:
-    """Detect holdout drift / leakage (R3, R12): the committed ``holdout.yaml`` must match the
-    deterministically-recomputed split AND each holdout seed's current content hash. Pure over the
-    corpus (``split_holdout`` / ``seed_hash`` are pure). Empty tuple ⇒ no drift."""
-    if not corpus.holdout_ids:
-        return ()   # bootstrap: no committed holdout yet
-    issues: list[str] = []
+    """Detect holdout drift / leakage / disablement (R3, R12, codex-F7): the committed
+    ``holdout.yaml`` must match the deterministically-recomputed split AND each holdout seed's
+    current content hash, and must not be silently missing/empty when the corpus expects one.
+    Pure over the corpus (``split_holdout`` / ``seed_hash`` are pure). Empty tuple ⇒ no drift."""
     recomputed = split_holdout(corpus.seeds)
+    if not corpus.holdout_ids:
+        # A missing/empty manifest disables the guard. Only legitimate when the corpus genuinely
+        # has no holdout-eligible class (every class < 3 seeds); otherwise it is drift/tampering.
+        if recomputed:
+            return (f"holdout manifest missing/empty but the corpus expects {len(recomputed)} "
+                    f"holdout seeds {sorted(recomputed)} — regenerate holdout.yaml",)
+        return ()
+    issues: list[str] = []
     if recomputed != corpus.holdout_ids:
         issues.append(f"holdout id-set drift: committed {sorted(corpus.holdout_ids)} "
                       f"!= recomputed {sorted(recomputed)}")
@@ -410,8 +455,11 @@ def check_holdout_integrity(corpus: Corpus) -> tuple[str, ...]:
             issues.append(f"holdout id {sid!r} absent from the corpus")
             continue
         committed_hash = corpus.holdout_hashes.get(sid, "")
+        if not committed_hash:
+            issues.append(f"holdout id {sid!r} has no committed sha256 (drift guard disabled)")
+            continue
         current_hash = seed_hash(by_id[sid])
-        if committed_hash and committed_hash != current_hash:
+        if committed_hash != current_hash:
             issues.append(f"holdout seed {sid!r} content drift: committed {committed_hash} "
                           f"!= current {current_hash}")
     return tuple(issues)
@@ -459,28 +507,50 @@ class Evaluation:
 
 
 def evaluate(corpus: Corpus, *, runs: int = DEFAULT_RUNS,
+             all_runs: list[list[metrics.SeedResult]] | None = None,
              live_delta: tuple[tuple[str, str, str], ...] = ()) -> Evaluation:
-    """Full stubbed evaluation: N runs -> metrics + determinism + baseline diff + integrity + verdict."""
-    all_runs = run_eval(corpus, mode=RunMode.STUBBED, runs=runs)
+    """Full stubbed evaluation: N runs -> metrics + determinism + baseline diff + integrity + verdict.
+
+    ``all_runs`` may be supplied to reuse an already-computed stubbed run (codex-F5: avoid a
+    redundant pass when the CLI also needs the stubbed results for the live delta)."""
+    if all_runs is None:
+        all_runs = run_eval(corpus, mode=RunMode.STUBBED, runs=runs)
     results = all_runs[0]
     m = metrics.compute_metrics(results, corpus.holdout_ids)
     det = metrics.determinism_report(all_runs)
     diff = metrics.diff_baseline(m, corpus.baseline)
     inventory = metrics.corpus_inventory(results)
-    integrity = check_holdout_integrity(corpus) + metrics.inventory_mismatch(inventory, corpus.inventory)
+    veto_kind_issues = tuple(
+        f"veto_kind mismatch (fixture vs derived verdict): {sid}"
+        for sid in metrics.veto_kind_mismatches(results))
+    integrity = (check_holdout_integrity(corpus)
+                 + metrics.inventory_mismatch(inventory, corpus.inventory)
+                 + veto_kind_issues)
     return Evaluation(metrics=m, determinism=det, baseline_diff=diff,
                       verdict=ci_verdict(m, det, diff, integrity), inventory=inventory,
                       integrity=integrity, live_delta=live_delta)
 
 
-def compute_live_delta(corpus: Corpus) -> tuple[tuple[str, str, str], ...]:
-    """Run LIVE (real call_llm) once and diff seed-level labels vs the stubbed (canned) run.
+def compute_live_delta(corpus: Corpus, canned_results: list[metrics.SeedResult], *,
+                       limit: int | None = None) -> tuple[tuple[str, str, str], ...]:
+    """Run LIVE (real call_llm) once and diff seed-level labels vs the reused stubbed run.
 
-    Logged, never gated (interview Q4). Any live failure surfaces as an unavailable label — this
-    is expected without credentials — so the delta is informational, not a pass/fail signal.
+    Logged, never gated (interview Q4). Only the LIVE pass runs here — the stubbed ``canned_results``
+    are reused from the report run (codex-F5 perf). REFUSES unsanitized trace-derived seeds so
+    real-secret-bearing content is never sent to the provider (codex-F5 egress). ``limit`` caps how
+    many seeds are sent (cost bound). Any live failure surfaces as an unavailable label.
     """
-    canned = {r.seed_id: (r.blocked, r.label) for r in run_eval(corpus, mode=RunMode.STUBBED)[0]}
-    live = {r.seed_id: (r.blocked, r.label) for r in run_eval(corpus, mode=RunMode.LIVE)[0]}
+    import dataclasses as _dc
+
+    unsanitized = sorted(s.id for s in corpus.seeds
+                         if s.source.startswith("trace:") and not s.sanitized)
+    if unsanitized:
+        raise FixtureError(f"--live refuses unsanitized trace-derived seeds (may leak secrets to the "
+                           f"provider): {unsanitized}. Scrub them and mark 'sanitized: true'.")
+    live_corpus = corpus if limit is None else _dc.replace(corpus, seeds=corpus.seeds[:limit])
+    ids = {s.id for s in live_corpus.seeds}
+    canned = {r.seed_id: (r.blocked, r.label) for r in canned_results if r.seed_id in ids}
+    live = {r.seed_id: (r.blocked, r.label) for r in run_eval(live_corpus, mode=RunMode.LIVE)[0]}
     delta: list[tuple[str, str, str]] = []
     for sid in sorted(canned):
         c, live_v = canned[sid], live.get(sid)
@@ -501,7 +571,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixtures", type=Path, default=FIXTURES_DIR)
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS, help="determinism runs (M3)")
     parser.add_argument("--live", action="store_true",
-                        help="also run LIVE (real call_llm) and log the delta (never gates)")
+                        help="also run LIVE (real call_llm) and log the delta (never gates); "
+                             "requires SKILL_REVIEW_EVAL_ALLOW_LIVE=1")
+    parser.add_argument("--live-limit", type=int, default=None,
+                        help="cap how many seeds --live sends to the provider (cost bound)")
     parser.add_argument("--write-holdout", action="store_true",
                         help="(dev) regenerate fixtures/holdout.yaml from the corpus")
     parser.add_argument("--write-baseline", action="store_true",
@@ -516,14 +589,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote holdout.yaml ({len(ids)} seeds)")
         corpus = load_corpus(args.fixtures)   # reload with the frozen ids
 
-    delta = compute_live_delta(corpus) if args.live else ()
-    ev = evaluate(corpus, runs=args.runs, live_delta=delta)
+    # Compute the stubbed runs ONCE and reuse for both the report and the live delta (codex-F5).
+    all_runs = run_eval(corpus, mode=RunMode.STUBBED, runs=args.runs)
+    delta: tuple[tuple[str, str, str], ...] = ()
+    if args.live:
+        if os.environ.get("SKILL_REVIEW_EVAL_ALLOW_LIVE") != "1":
+            print("REFUSING --live: set SKILL_REVIEW_EVAL_ALLOW_LIVE=1 to allow sending seed "
+                  "content to a model provider (network egress).")
+            return 2
+        delta = compute_live_delta(corpus, all_runs[0], limit=args.live_limit)
+    ev = evaluate(corpus, all_runs=all_runs, live_delta=delta)
     inv = ev.inventory
     print(f"corpus: {inv['total']} seeds; reviewer-enforced veto/class="
           f"{inv['reviewer_enforced_veto_per_class']}; deferred={inv['deferred_ids']}; "
           f"blocked-unavailable={inv['blocked_unavailable_ids']}")
 
     if args.write_inventory:
+        # F10: never normalize a failed/tampered corpus into the frozen inventory.
+        if not ev.verdict.ok:
+            print("REFUSING to write inventory.json from a FAILED run (would freeze a miss/drift):")
+            for reason in ev.verdict.reasons:
+                print(f"  - {reason}")
+            return 1
         (args.fixtures / "inventory.json").write_text(
             json.dumps(inv, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         print("wrote inventory.json")

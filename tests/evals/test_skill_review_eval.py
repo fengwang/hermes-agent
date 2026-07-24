@@ -45,6 +45,17 @@ def _write_corpus(tmp_path: Path, seeds: list[dict]) -> Path:
 _CLEAN = "---\nname: clean-skill\ndescription: A clean skill.\n---\n\nAn ordinary body.\n"
 
 
+def _valid_seed(**over) -> dict:
+    """A minimal SCHEMA-VALID seed dict; override one field to test a specific validation."""
+    base = {
+        "id": "SEED-X1", "cls": "allow", "expected_decision": "allow", "enforcement": "reviewer",
+        "veto_kind": "deterministic", "source": "test", "rationale": "test",
+        "writes": [{"action": "create", "name": "clean-skill", "content": _CLEAN}],
+    }
+    base.update(over)
+    return base
+
+
 # --------------------------------------------------------------------------- #
 # Acceptance — the real corpus meets the exit criteria
 # --------------------------------------------------------------------------- #
@@ -121,30 +132,52 @@ class TestReadOnly:
 # --------------------------------------------------------------------------- #
 class TestFixtureErrors:
     def test_missing_canned_response_raises(self, tmp_path):
-        d = _write_corpus(tmp_path, [{
-            "id": "X1", "cls": "allow", "expected_decision": "allow", "enforcement": "reviewer",
-            "writes": [{"action": "create", "name": "clean-skill", "content": _CLEAN}],
-            # no llm map: the clean skill reaches the security LLM with no canned response
-        }])
+        # a clean seed with no llm map reaches the security LLM with no canned response
+        d = _write_corpus(tmp_path, [_valid_seed()])
         c = harness.load_corpus(d)
         with pytest.raises(harness.MissingCannedResponse):
             harness.run_eval(c, mode=harness.RunMode.STUBBED, runs=1)
 
     def test_duplicate_id_raises(self, tmp_path):
-        seed = {"id": "DUP", "cls": "allow", "expected_decision": "allow",
-                "writes": [{"action": "create", "name": "a", "content": _CLEAN}]}
-        d = _write_corpus(tmp_path, [seed, seed])
+        d = _write_corpus(tmp_path, [_valid_seed(id="SEED-DUP"), _valid_seed(id="SEED-DUP")])
         with pytest.raises(harness.FixtureError, match="duplicate"):
             harness.load_corpus(d)
 
     def test_missing_required_field_raises(self, tmp_path):
-        d = _write_corpus(tmp_path, [{"id": "BAD", "writes": [{"action": "create", "name": "a"}]}])
+        d = _write_corpus(tmp_path, [{"id": "SEED-BAD", "writes": [{"action": "create", "name": "a"}]}])
         with pytest.raises(harness.FixtureError):
             harness.load_corpus(d)
 
     def test_seed_with_no_writes_raises(self, tmp_path):
-        d = _write_corpus(tmp_path, [{"id": "NOW", "cls": "allow", "expected_decision": "allow",
-                                      "writes": []}])
+        d = _write_corpus(tmp_path, [_valid_seed(writes=[])])
+        with pytest.raises(harness.FixtureError, match="write"):
+            harness.load_corpus(d)
+
+
+# --------------------------------------------------------------------------- #
+# Fixture SCHEMA validation (codex-F1): a typo must FAIL, never silently miscategorize
+# --------------------------------------------------------------------------- #
+class TestFixtureValidation:
+    @pytest.mark.parametrize("over", [
+        {"expected_decision": "vetoo"},                          # typo'd decision
+        {"cls": "securty"},                                      # typo'd class
+        {"expected_decision": "veto", "cls": "security", "enforcement": "reviewr"},  # typo'd enforcement
+        {"expected_decision": "veto", "cls": "security", "expected_reviewers": ["security"],
+         "veto_kind": "determinstic"},                           # typo'd veto_kind
+        {"expected_decision": "veto", "cls": "security", "expected_reviewers": ["securty"]},  # bad reviewer
+        {"id": "SEED-x|evil"},                                   # markdown-breaking id
+        {"source": "", "rationale": ""},                         # missing provenance
+        {"expected_decision": "veto", "cls": "security", "expected_reviewers": []},   # cross-field: veto needs reviewers
+    ])
+    def test_invalid_label_raises(self, tmp_path, over):
+        d = _write_corpus(tmp_path, [_valid_seed(**over)])
+        with pytest.raises(harness.FixtureError):
+            harness.load_corpus(d)
+
+    def test_invalid_llm_task_raises(self, tmp_path):
+        seed = _valid_seed(llm={"skill_review_bogus":
+                                {"kind": "content", "verdict": {"decision": "pass"}}})
+        d = _write_corpus(tmp_path, [seed])
         with pytest.raises(harness.FixtureError):
             harness.load_corpus(d)
 
@@ -154,11 +187,12 @@ class TestFixtureErrors:
 # --------------------------------------------------------------------------- #
 def _sr(seed_id="X", *, sig="s", blocked=True, cls="security", enforcement="reviewer",
         expected="veto", expected_rev=("security",), firing=("security",),
-        label: str | None = "blocked-by-veto", veto_kind="deterministic"):
+        label: str | None = "blocked-by-veto", veto_kind="deterministic",
+        actual: str | None = None):
     return metrics.SeedResult(seed_id=seed_id, cls=cls, enforcement=enforcement,
                               expected_decision=expected, expected_reviewers=expected_rev,
                               veto_kind=veto_kind, blocked=blocked, firing_reviewers=firing,
-                              label=label, deterministic_signature=sig)
+                              label=label, deterministic_signature=sig, actual_veto_mechanism=actual)
 
 
 def _stable_det():
@@ -467,3 +501,126 @@ class TestWriteBaselineGuard:
         rc = harness.main(["--write-baseline", "--fixtures", str(tmp_path)])
         assert rc == 1
         assert not (tmp_path / "baseline.json").exists()   # not frozen
+
+    def test_refuses_to_write_inventory_on_failed_verdict(self, tmp_path, monkeypatch, corpus):
+        import dataclasses
+        failed = dataclasses.replace(harness.evaluate(corpus),
+                                     verdict=harness.CiVerdict(False, ("forced failure",)))
+        monkeypatch.setattr(harness, "load_corpus", lambda *a, **k: corpus)
+        monkeypatch.setattr(harness, "evaluate", lambda *a, **k: failed)
+        rc = harness.main(["--write-inventory", "--fixtures", str(tmp_path)])
+        assert rc == 1 and not (tmp_path / "inventory.json").exists()   # codex-F10
+
+
+# --------------------------------------------------------------------------- #
+# Codex external-review findings
+# --------------------------------------------------------------------------- #
+class TestPerClassM2:   # codex-F2
+    def test_m2_reported_per_class(self):
+        results = [
+            _sr("SEED-OKa", cls="security", expected="allow", expected_rev=(),
+                blocked=True, firing=("security",), label="blocked-by-veto"),
+            _sr("SEED-OKb", cls="safety", expected="allow", expected_rev=(),
+                blocked=False, firing=(), label=None),
+        ]
+        by = dict(metrics.compute_metrics(results, frozenset()).split("all").m2_by_class)
+        assert by["security"].false_veto == 1 and by["security"].rate == 1.0
+        assert by["safety"].false_veto == 0
+
+
+class TestPartialConfusion:   # codex-F3
+    def test_partial_multi_reviewer_miss(self):
+        r = _sr("SEED-ADV2", cls="adversarial", expected="veto", enforcement="reviewer",
+                expected_rev=("security", "safety"), blocked=True, firing=("security",),
+                label="blocked-by-veto")
+        e = metrics.compute_metrics([r], frozenset()).confusion[0]
+        assert e.verdict == "partial" and e.missing_expected == ("safety",)
+
+    def test_full_multi_reviewer_is_correct(self):
+        r = _sr("SEED-ADV2", cls="adversarial", expected="veto",
+                expected_rev=("security", "safety"), blocked=True, firing=("safety", "security"),
+                label="blocked-by-veto")
+        assert metrics.compute_metrics([r], frozenset()).confusion[0].verdict == "correct"
+
+
+class TestVetoKindDerivation:   # codex-F4
+    def test_mislabel_detected(self):
+        # a static/deterministic block mislabeled veto_kind=llm (would dodge the deterministic gate)
+        r = _sr("SEED-SEC1", veto_kind="llm", actual="deterministic", blocked=True)
+        assert metrics.veto_kind_mismatches([r]) == ("SEED-SEC1",)
+
+    def test_match_ok(self):
+        r = _sr("SEED-SEC1", veto_kind="deterministic", actual="deterministic", blocked=True)
+        assert metrics.veto_kind_mismatches([r]) == ()
+
+    def test_real_corpus_veto_kinds_match_derived_mechanism(self, corpus):
+        results = harness.run_eval(corpus, mode=harness.RunMode.STUBBED)[0]
+        assert metrics.veto_kind_mismatches(results) == ()   # fixtures' veto_kind matches reality
+
+    def test_integrity_flags_mismatch_in_evaluation(self, corpus, evaluation):
+        assert not any("veto_kind mismatch" in i for i in evaluation.integrity)
+
+
+class TestHoldoutIntegrityGuards:   # codex-F7
+    def test_empty_holdout_when_expected_is_flagged(self, corpus):
+        import dataclasses
+        emptied = dataclasses.replace(corpus, holdout_ids=frozenset(), holdout_hashes={})
+        issues = harness.check_holdout_integrity(emptied)
+        assert any("missing/empty" in i for i in issues)
+
+    def test_empty_committed_hash_is_flagged(self, corpus):
+        import dataclasses
+        hid = sorted(corpus.holdout_ids)[0]
+        hashes = dict(corpus.holdout_hashes)
+        hashes[hid] = ""
+        issues = harness.check_holdout_integrity(dataclasses.replace(corpus, holdout_hashes=hashes))
+        assert any("no committed sha256" in i for i in issues)
+
+
+class TestLiveGuard:   # codex-F5
+    def test_live_requires_env_guard(self, monkeypatch, corpus):
+        monkeypatch.setattr(harness, "load_corpus", lambda *a, **k: corpus)
+        monkeypatch.delenv("SKILL_REVIEW_EVAL_ALLOW_LIVE", raising=False)
+        assert harness.main(["--live", "--fixtures", "/unused"]) == 2
+
+    def test_live_rejects_unsanitized_trace_seed(self, corpus):
+        import dataclasses
+        traced = dataclasses.replace(corpus.seeds[0], source="trace:foo", sanitized=False)
+        c = dataclasses.replace(corpus, seeds=(traced,) + corpus.seeds[1:])
+        with pytest.raises(harness.FixtureError, match="trace"):
+            harness.compute_live_delta(c, [])
+
+
+class TestHarnessEvalPath:   # codex-F9
+    def test_run_eval_uses_eval_mode(self, corpus, monkeypatch):
+        from tools.skill_review.panel import Panel, PanelMode
+        modes: list = []
+        original = Panel.review
+
+        def spy(self, write, mode=PanelMode.GATE):
+            modes.append(mode)
+            return original(self, write, mode)
+
+        monkeypatch.setattr(Panel, "review", spy)
+        harness.run_eval(corpus, mode=harness.RunMode.STUBBED, runs=1)
+        assert modes and all(m is PanelMode.EVAL for m in modes)   # never GATE via the harness path
+
+
+def _metrics_with_holdout_m1(rates: dict) -> metrics.Metrics:
+    m1 = tuple(metrics.ClassM1(cls=c, total=2, missed=round(r * 2), missed_ids=())
+               for c, r in rates.items())
+    holdout = metrics.SplitMetrics("holdout", m1, metrics.M2Result(0, 0, (), ()))
+    inv = metrics.InvariantResults(0, 0, (), 0, 0, ())
+    return metrics.Metrics(splits=(holdout,), confusion=(), invariants=inv, deferred=())
+
+
+class TestHoldoutM1Regression:   # codex-F11
+    def test_holdout_m1_regression_detected(self):
+        base = _metrics_with_holdout_m1({"security": 0.0}).to_dict()
+        worse = _metrics_with_holdout_m1({"security": 0.5})
+        assert metrics.diff_baseline(worse, base).is_regression
+
+    def test_holdout_m1_no_regression_ok(self):
+        base = _metrics_with_holdout_m1({"security": 0.0}).to_dict()
+        same = _metrics_with_holdout_m1({"security": 0.0})
+        assert not metrics.diff_baseline(same, base).is_regression

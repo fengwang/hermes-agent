@@ -83,10 +83,14 @@ def render_markdown(corpus: "Corpus", ev: "Evaluation", *, calibration_log: str 
         out += [_m1_line(c) for c in split.m1] or ["| _(none)_ | n/a | |"]
         out.append("")
 
-    # M2
+    # M2 — aggregate per split + per class (codex-F2)
     out += ["## False-veto (M2) — should-allow blocked", "| split | M2 (false/total) |", "|---|---|"]
     for split in m.splits:
         out.append(f"| {split.name} | {_m2_line(split.m2)} |")
+    by_class = m.split("all").m2_by_class
+    if by_class:
+        out += ["", "Per-class M2 (all split):", "| class | M2 (false/total) |", "|---|---|"]
+        out += [f"| {cls} | {_m2_line(m2)} |" for cls, m2 in by_class]
     attest = m.split("all").m2.attribution
     if attest:
         out += ["", "False-veto attribution (all split):"]
@@ -102,15 +106,16 @@ def render_markdown(corpus: "Corpus", ev: "Evaluation", *, calibration_log: str 
         out += [f"- unstable: {list(ev.determinism.unstable)}"]
     out.append("")
 
-    # Per-reviewer confusion
+    # Per-reviewer confusion (codex-F3: partial multi-reviewer misses shown, not marked correct)
     out += ["## Per-reviewer confusion (veto seeds)",
-            "| seed | class | expected reviewer(s) | fired | verdict |", "|---|---|---|---|---|"]
+            "| seed | class | expected | fired | missing | verdict |",
+            "|---|---|---|---|---|---|"]
     for e in m.confusion:
         out.append(f"| {e.seed_id} | {e.cls} | {list(e.expected_reviewers)} | "
-                   f"{list(e.firing_reviewers)} | {e.verdict} |")
-    misattr = [e.seed_id for e in m.confusion if e.verdict == "misattributed"]
-    if misattr:
-        out += ["", f"⚠ mis-attributions (right decision, wrong reviewer): {misattr}"]
+                   f"{list(e.firing_reviewers)} | {list(e.missing_expected)} | {e.verdict} |")
+    flagged = [e.seed_id for e in m.confusion if e.verdict in ("misattributed", "partial")]
+    if flagged:
+        out += ["", f"⚠ mis-attributed / partial (an expected reviewer did not fire): {flagged}"]
     out.append("")
 
     # Injection + labeling
