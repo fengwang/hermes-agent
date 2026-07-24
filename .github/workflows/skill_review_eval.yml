@@ -1,0 +1,88 @@
+name: Skill-Review Eval (offline)
+
+# Offline meta-evaluation of the skill-review gate (S5). Scores the frozen reviewer panel in
+# EVAL mode over the labelled seed corpus and enforces the acceptance invariants. It is fully
+# OFFLINE (LLM reviewers use canned fixtures — no provider credentials, no network to a model)
+# and NEVER touches the live skill_manage write path.
+#
+# The build goes RED (the `--report` step exits non-zero) on any invariant breach or holdout
+# regression vs the committed baseline (interview Q3): M3 determinism, injection attack-success
+# != 0 (SEED-ADV1..3), SEED-ADV5 mislabeled, deterministic-class missed-bad > 0, or holdout
+# M1/M2 regression. M2 magnitude and LLM-class M1 magnitude are reported, not gated.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "evals/skill_review/**"
+      - "tools/skill_review/**"
+      - "tests/evals/**"
+      - ".github/workflows/skill_review_eval.yml"
+  pull_request:
+    paths:
+      - "evals/skill_review/**"
+      - "tools/skill_review/**"
+      - "tests/evals/**"
+      - ".github/workflows/skill_review_eval.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-review-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: Offline skill-review eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        uses: ./.github/actions/retry
+        with:
+          command: uv sync --locked --python 3.11 --extra all --extra dev
+
+      - name: Run eval unit tests
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/evals/test_skill_review_eval.py -q
+        env:
+          # deterministic: no reviewer ever reaches a real model in CI
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+      - name: Generate report + enforce invariants
+        # `--report` writes report.md/report.json AND returns a non-zero exit code when a CI
+        # hard-fail condition is met (invariants / holdout regression). This is the gate.
+        run: |
+          source .venv/bin/activate
+          python -m evals.skill_review.harness --report --out "${RUNNER_TEMP}/skill_review_report"
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+      - name: Upload eval report artifact
+        if: always()   # upload even when the invariant gate fails, for triage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: skill-review-eval-report
+          path: ${{ runner.temp }}/skill_review_report
+          retention-days: 14

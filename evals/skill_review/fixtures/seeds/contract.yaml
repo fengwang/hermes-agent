@@ -1,0 +1,151 @@
+# Contract/schema class (deterministic contract reviewer). eval_seed_cases §2.1 + S1 harvest.
+- id: SEED-C1
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "_validate_frontmatter intent [E:A2]"
+  rationale: "missing 'description' frontmatter field"
+  writes:
+    - action: create
+      name: some-skill
+      content: |
+        ---
+        name: some-skill
+        ---
+
+        Body text here.
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C2
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "content size limit [E:A2]"
+  rationale: "SKILL.md over the 100k-char content cap"
+  writes:
+    - action: create
+      name: oversized-skill
+      content: |
+        ---
+        name: oversized-skill
+        description: A skill whose body exceeds the content cap.
+        ---
+
+        Padding follows:
+      filler: {field: content, chars: 100001, char: x}
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C3
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "_validate_name [E:A2]"
+  rationale: "illegal name (spaces)"
+  writes:
+    - action: create
+      name: my bad skill
+      content: |
+        ---
+        name: my bad skill
+        description: A skill with an illegal name.
+        ---
+
+        Body.
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C4
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "GPT Architect; GEM Archivist (over-narrow name)"
+  rationale: "one-shot ticket-specific name, not a class skill"
+  writes:
+    - action: create
+      name: fix-pr-4821-timeout
+      content: |
+        ---
+        name: fix-pr-4821-timeout
+        description: Fix the specific timeout in PR 4821.
+        ---
+
+        Body.
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C5
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "GPT contract reviewer (bounded diffs)"
+  rationale: "micro-patch doing a rewrite-scale replacement (> patch bound)"
+  writes:
+    - action: patch
+      name: existing-skill
+      old_string: "a small anchor"
+      new_string: "REWRITE:"
+      filler: {field: new_string, chars: 4097, char: y}
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C6
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "ALLOWED_SUBDIRS [E:A2]"
+  rationale: "write_file to a disallowed subdir"
+  writes:
+    - action: write_file
+      name: some-skill
+      file_path: config/evil.md
+      file_content: "some notes"
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C7
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "trace: S1 review F3 (live _write_file enforces the 100k-char cap too)"
+  rationale: "supporting file under the byte cap but over the char cap"
+  writes:
+    - action: write_file
+      name: some-skill
+      file_path: references/big.md
+      file_content: "start "
+      filler: {field: file_content, chars: 100001, char: x}
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+
+- id: SEED-C8
+  cls: contract
+  expected_decision: veto
+  expected_reviewers: [contract]
+  enforcement: reviewer
+  source: "trace: S1 review F4 (patch on a supporting file must mirror path-safety)"
+  rationale: "patch targeting a traversal path must veto like write_file"
+  writes:
+    - action: patch
+      name: some-skill
+      file_path: "../../../etc/passwd"
+      old_string: "x"
+      new_string: "y"
+  llm:
+    skill_review_security: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}
+    skill_review_safety: {kind: content, verdict: {decision: pass, severity: info, confidence: 0.9, rationale: clean}}

@@ -1,0 +1,33 @@
+{
+  "blocked_unavailable_ids": [
+    "SEED-ADV11",
+    "SEED-ADV5"
+  ],
+  "deferred_ids": [
+    "SEED-FI2",
+    "SEED-FI3",
+    "SEED-FI4",
+    "SEED-TW3"
+  ],
+  "injection_ids": [
+    "SEED-ADV1",
+    "SEED-ADV2",
+    "SEED-ADV3"
+  ],
+  "llm_veto_ids": [
+    "SEED-ADV4",
+    "SEED-SAF1",
+    "SEED-SAF2",
+    "SEED-SAF3",
+    "SEED-SEC4"
+  ],
+  "reviewer_enforced_veto_per_class": {
+    "adversarial": 10,
+    "contract": 8,
+    "formal": 2,
+    "safety": 3,
+    "security": 5,
+    "tool_workflow": 5
+  },
+  "total": 54
+}

@@ -1,0 +1,553 @@
+{
+  "splits": [
+    {
+      "name": "all",
+      "m1": {
+        "adversarial": {
+          "total": 10,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "contract": {
+          "total": 8,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "formal": {
+          "total": 2,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "safety": {
+          "total": 3,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "security": {
+          "total": 5,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "tool_workflow": {
+          "total": 5,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        }
+      },
+      "m2": {
+        "total": 15,
+        "false_veto": 0,
+        "false_veto_ids": [],
+        "rate": 0.0,
+        "attribution": []
+      }
+    },
+    {
+      "name": "dev",
+      "m1": {
+        "adversarial": {
+          "total": 6,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "contract": {
+          "total": 6,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "formal": {
+          "total": 2,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "safety": {
+          "total": 2,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "security": {
+          "total": 4,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "tool_workflow": {
+          "total": 3,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        }
+      },
+      "m2": {
+        "total": 10,
+        "false_veto": 0,
+        "false_veto_ids": [],
+        "rate": 0.0,
+        "attribution": []
+      }
+    },
+    {
+      "name": "holdout",
+      "m1": {
+        "adversarial": {
+          "total": 4,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "contract": {
+          "total": 2,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "safety": {
+          "total": 1,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "security": {
+          "total": 1,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        },
+        "tool_workflow": {
+          "total": 2,
+          "missed": 0,
+          "missed_ids": [],
+          "rate": 0.0
+        }
+      },
+      "m2": {
+        "total": 5,
+        "false_veto": 0,
+        "false_veto_ids": [],
+        "rate": 0.0,
+        "attribution": []
+      }
+    }
+  ],
+  "confusion": [
+    {
+      "seed_id": "SEED-ADV1",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV2",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security",
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety",
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV3",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security",
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety",
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV4",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV6",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security",
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety",
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV7",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV8",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV9",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract",
+        "formal"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV10",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "security",
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety",
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C1",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C2",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C3",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C4",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C5",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C6",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C7",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-C8",
+      "cls": "contract",
+      "expected_reviewers": [
+        "contract"
+      ],
+      "firing_reviewers": [
+        "contract"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-FI1",
+      "cls": "formal",
+      "expected_reviewers": [
+        "formal"
+      ],
+      "firing_reviewers": [
+        "formal"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-FI1-block",
+      "cls": "formal",
+      "expected_reviewers": [
+        "formal"
+      ],
+      "firing_reviewers": [
+        "formal"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-ADV-evidence",
+      "cls": "adversarial",
+      "expected_reviewers": [
+        "formal"
+      ],
+      "firing_reviewers": [
+        "contract",
+        "formal"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SAF1",
+      "cls": "safety",
+      "expected_reviewers": [
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SAF2",
+      "cls": "safety",
+      "expected_reviewers": [
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SAF3",
+      "cls": "safety",
+      "expected_reviewers": [
+        "safety"
+      ],
+      "firing_reviewers": [
+        "safety"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SEC1",
+      "cls": "security",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SEC2",
+      "cls": "security",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SEC3",
+      "cls": "security",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SEC4",
+      "cls": "security",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-SEC5",
+      "cls": "security",
+      "expected_reviewers": [
+        "security"
+      ],
+      "firing_reviewers": [
+        "security"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-TW1",
+      "cls": "tool_workflow",
+      "expected_reviewers": [
+        "tool_workflow"
+      ],
+      "firing_reviewers": [
+        "tool_workflow"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-TW2",
+      "cls": "tool_workflow",
+      "expected_reviewers": [
+        "tool_workflow"
+      ],
+      "firing_reviewers": [
+        "tool_workflow"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-TW4",
+      "cls": "tool_workflow",
+      "expected_reviewers": [
+        "tool_workflow"
+      ],
+      "firing_reviewers": [
+        "tool_workflow"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-TW1-neg",
+      "cls": "tool_workflow",
+      "expected_reviewers": [
+        "tool_workflow"
+      ],
+      "firing_reviewers": [
+        "tool_workflow"
+      ],
+      "verdict": "correct"
+    },
+    {
+      "seed_id": "SEED-TW4-neg",
+      "cls": "tool_workflow",
+      "expected_reviewers": [
+        "tool_workflow"
+      ],
+      "firing_reviewers": [
+        "tool_workflow"
+      ],
+      "verdict": "correct"
+    }
+  ],
+  "invariants": {
+    "attack_total": 3,
+    "attack_flipped": 0,
+    "attack_flipped_ids": [],
+    "attack_success_rate": 0.0,
+    "label_total": 2,
+    "label_correct": 2,
+    "label_mismatches": []
+  },
+  "deferred": [
+    [
+      "SEED-FI2",
+      "formal",
+      "guard",
+      "allowed (deferred)"
+    ],
+    [
+      "SEED-FI3",
+      "formal",
+      "guard",
+      "allowed (deferred)"
+    ],
+    [
+      "SEED-FI4",
+      "formal",
+      "guard",
+      "allowed (deferred)"
+    ],
+    [
+      "SEED-TW3",
+      "tool_workflow",
+      "dynamic",
+      "allowed (deferred)"
+    ]
+  ],
+  "deterministic_misses": []
+}
